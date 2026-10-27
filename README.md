@@ -2,7 +2,9 @@
 
 Микросервис для асинхронной обработки платежей с гарантированной доставкой событий через паттерн **Transactional Outbox**, защитой от дублей и Dead Letter Queue (DLQ).
 
-> Подробное описание архитектуры, паттернов и схемы БД доступно в [ARCHITECTURE.md](./architecture/summary.md).
+> Подробное описание архитектуры доступно в [summary.md](./architecture/summary.md).
+> Подробное описание паттернов и схемы БД доступно в [data.md](./architecture/data.md).
+> Подробное описание архитектуры, паттерна outbox [outbox.md](./architecture/outbox.md).
 
 ## 🚀 Стек технологий
 *   **API**: FastAPI + Pydantic v2
