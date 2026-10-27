@@ -1,19 +1,38 @@
 name: tests
-on: [push, pull_request]
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
 
 jobs:
-  unit:
+  test:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker compose --profile test run --rm --build pcc_tests
 
-  integration:
-    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - run: |
-          docker compose -f docker-compose.test.yml --profile test up \
-            --build --abort-on-container-exit --exit-code-from tests tests
-      - if: always()
-        run: docker compose -f docker-compose.test.yml down -v
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Cache Docker layers
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+
+      - name: Start test DB
+        run: docker compose -f docker-compose.test.yml up -d test_db
+
+      - name: Run migrations
+        run: docker compose -f docker-compose.test.yml run --rm test_migrations
+
+      - name: Run tests
+        run: docker compose -f docker-compose.test.yml run --rm tests
+
+      - name: Cleanup
+        if: always()
+        run: docker compose -f docker-compose.test.yml down -v --remove-orphans
