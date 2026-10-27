@@ -1,5 +1,17 @@
 FROM python:3.13-slim-bookworm AS base
 
+WORKDIR /usr/src/app
+
+RUN rm -rf /var/lib/apt/lists/* /root/.cache/* /root/.config/* /root/.local/*
+
+RUN groupadd -g 1001 appuser \
+    && useradd -r -u 1001 -g appuser appuser \
+    && chown -R appuser:appuser /usr/src/app \
+    && chmod 755 /usr/src/app
+
+# ---------- Production deps ----------
+FROM base AS prod-deps
+
 ARG PYPI_INDEX_URL=https://pypi.org/simple
 ARG POETRY_VERSION=2.5.1
 
@@ -9,32 +21,20 @@ ENV PIP_NO_CACHE_DIR=1 \
     POETRY_VIRTUALENVS_CREATE=false \
     POETRY_NO_INTERACTION=1
 
-WORKDIR /usr/src/app
-
-RUN rm -rf /var/lib/apt/lists/* /root/.cache/* /root/.config/* /root/.local/*
-
-RUN groupadd -g 1001 appuser \
- && useradd -r -u 1001 -g appuser -m -d /home/appuser appuser \
- && chown -R appuser:appuser /usr/src/app \
- && chmod 755 /usr/src/app \
-
-# ---------- Production deps ----------
-FROM base AS prod-deps
-
 COPY pyproject.toml poetry.lock ./
 
 RUN pip install "poetry==$POETRY_VERSION" \
- && poetry install --no-root --only main \
- && pip uninstall -y poetry \
- && rm -rf /var/lib/apt/lists/* /root/.cache/* /root/.config/* /root/.local/*
+    && poetry install --no-root --only main \
+    && pip uninstall -y poetry \
+    && rm -rf /var/lib/apt/lists/* /root/.cache/* /root/.config/* /root/.local/*
 
 # ---------- Dev deps ----------
 FROM prod-deps AS dev-deps
 
 RUN pip install "poetry==$POETRY_VERSION" \
- && poetry install --no-root --only dev \
- && pip uninstall -y poetry \
- && rm -rf /root/.cache/* /root/.config/* /root/.local/*
+    && poetry install --no-root --only dev \
+    && pip uninstall -y poetry \
+    && rm -rf /root/.cache/* /root/.config/* /root/.local/*
 
 # ---------- Code ----------
 FROM base AS code-layer
@@ -65,10 +65,10 @@ COPY --chown=appuser:appuser ./consumer ./consumer
 USER appuser
 CMD ["python", "-m", "consumer.main"]
 
-# ---------- Consumer ----------
+# ---------- Outbox Relay ----------
 FROM prod-deps AS outbox_relay
 COPY --from=code-layer --chown=appuser:appuser /usr/src/app/ ./
-COPY --chown=appuser:appuser ./consumer ./consumer
+COPY --chown=appuser:appuser ./outbox_relay ./outbox_relay
 USER appuser
 CMD ["python", "-m", "outbox_relay.main"]
 
@@ -86,6 +86,5 @@ COPY --from=code-layer --chown=appuser:appuser /usr/src/app/ ./
 COPY --chown=appuser:appuser ./tests ./tests
 COPY --chown=appuser:appuser alembic.ini ./
 COPY --chown=appuser:appuser ./alembic ./alembic
-
 USER appuser
-CMD ["sh", "-c", "python -m alembic upgrade head && python -m pytest tests -v"]
+CMD ["python", "-m", "pytest", "tests", "-v"]
