@@ -1,0 +1,166 @@
+version: '3.8'
+
+name: payment_cookie_cute
+
+services:
+  pcc_rabbitmq:
+    image: rabbitmq:3.12-management
+    ports:
+      - "127.0.0.1:5672:5672"
+      - "0.0.0.0:15672:15672"
+    environment:
+      - RABBITMQ_DEFAULT_VHOST=/
+      - RABBITMQ_DEFAULT_USER=${RABBITMQ_USER:-test-user}
+      - RABBITMQ_DEFAULT_PASS=${RABBITMQ_PASSWORD:-test-user}
+    volumes:
+      - ./pcc_rabbitmq_data:/var/lib/rabbitmq
+      - ./pcc_rabbitmq_log:/var/log/rabbitmq
+    healthcheck:
+      test: rabbitmq-diagnostics -q check_running
+      interval: 5s
+      timeout: 30s
+      retries: 10
+    networks:
+      - pcc_shared_net
+
+  pcc_api:
+    build:
+      context: .
+      target: main
+    ports:
+      - "0.0.0.0:8000:8000"
+    environment:
+      - DATABASE_DRIVER=${DATABASE_DRIVER:-postgresql+asyncpg}
+      - DATABASE_NAME=${DATABASE_NAME:-postgres}
+      - DATABASE_HOST=${DATABASE_HOST:-pcc_db}
+      - DATABASE_USERNAME=${DATABASE_USERNAME:-postgres}
+      - DATABASE_PASSWORD=${DATABASE_PASSWORD:-postgres}
+      - DATABASE_PORT=${DATABASE_PORT:-5432}
+      - DATABASE_ECHO=${DATABASE_ECHO:-false}
+      - RABBITMQ_HOST=${RABBITMQ_HOST:-pcc_rabbitmq}
+      - RABBITMQ_USER=${RABBITMQ_USER:-test-user}
+      - RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD:-test-user}
+      - RABBITMQ_PORT=${RABBITMQ_PORT:-5672}
+      - PCC_PROFILE=${PCC_PROFILE:-development}
+      - PCC_API_KEY=${PCC_API_KEY:-dev-secret-key}
+      - WEBHOOK_TIMEOUT=${WEBHOOK_TIMEOUT:-10}
+      - WEBHOOK_MAX_RETRIES=${WEBHOOK_MAX_RETRIES:-3}
+    networks:
+      - pcc_shared_net
+    volumes:
+      - .:/usr/src/app
+    depends_on:
+      pcc_rabbitmq:
+        condition: service_healthy
+      pcc_db:
+        condition: service_healthy
+      pcc_migrations:
+        condition: service_completed_successfully
+
+  pcc_consumer:
+    build:
+      context: .
+      target: consumer
+    environment:
+      - DATABASE_DRIVER=${DATABASE_DRIVER:-postgresql+asyncpg}
+      - DATABASE_NAME=${DATABASE_NAME:-postgres}
+      - DATABASE_HOST=${DATABASE_HOST:-pcc_db}
+      - DATABASE_USERNAME=${DATABASE_USERNAME:-postgres}
+      - DATABASE_PASSWORD=${DATABASE_PASSWORD:-postgres}
+      - DATABASE_PORT=${DATABASE_PORT:-5432}
+      - DATABASE_ECHO=${DATABASE_ECHO:-false}
+      - RABBITMQ_HOST=${RABBITMQ_HOST:-pcc_rabbitmq}
+      - RABBITMQ_USER=${RABBITMQ_USER:-test-user}
+      - RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD:-test-user}
+      - RABBITMQ_PORT=${RABBITMQ_PORT:-5672}
+      - PCC_PROFILE=${PCC_PROFILE:-development}
+    networks:
+      - pcc_shared_net
+    volumes:
+      - .:/usr/src/app
+    depends_on:
+      pcc_rabbitmq:
+        condition: service_healthy
+      pcc_db:
+        condition: service_healthy
+      pcc_migrations:
+        condition: service_completed_successfully
+
+  pcc_outbox_relay:
+    build:
+      context: .
+      target: outbox_relay
+    environment:
+      - DATABASE_DRIVER=${DATABASE_DRIVER:-postgresql+asyncpg}
+      - DATABASE_NAME=${DATABASE_NAME:-postgres}
+      - DATABASE_HOST=${DATABASE_HOST:-pcc_db}
+      - DATABASE_USERNAME=${DATABASE_USERNAME:-postgres}
+      - DATABASE_PASSWORD=${DATABASE_PASSWORD:-postgres}
+      - DATABASE_PORT=${DATABASE_PORT:-5432}
+      - DATABASE_ECHO=${DATABASE_ECHO:-false}
+      - RABBITMQ_HOST=${RABBITMQ_HOST:-pcc_rabbitmq}
+      - RABBITMQ_USER=${RABBITMQ_USER:-test-user}
+      - RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD:-test-user}
+      - RABBITMQ_PORT=${RABBITMQ_PORT:-5672}
+      - PCC_PROFILE=${PCC_PROFILE:-development}
+    networks:
+      - pcc_shared_net
+    volumes:
+      - .:/usr/src/app
+    depends_on:
+      pcc_rabbitmq:
+        condition: service_healthy
+      pcc_db:
+        condition: service_healthy
+      pcc_migrations:
+        condition: service_completed_successfully
+
+  pcc_db:
+    image: postgres:15
+    shm_size: "2gb"
+    ports:
+      - "127.0.0.1:5432:5432"
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_DB=${POSTGRES_DB:-postgres}
+    volumes:
+      - ./pcc_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - pcc_shared_net
+
+  pcc_migrations:
+    build:
+      context: .
+      target: migrations
+    environment:
+      - DATABASE_DRIVER=${DATABASE_DRIVER:-postgresql+asyncpg}
+      - DATABASE_NAME=${DATABASE_NAME:-postgres}
+      - DATABASE_HOST=${DATABASE_HOST:-pcc_db}
+      - DATABASE_USERNAME=${DATABASE_USERNAME:-postgres}
+      - DATABASE_PASSWORD=${DATABASE_PASSWORD:-postgres}
+      - DATABASE_PORT=${DATABASE_PORT:-5432}
+      - DATABASE_ECHO=${DATABASE_ECHO:-false}
+      - PROFILE=${PROFILE:-production}
+    networks:
+      - pcc_shared_net
+    volumes:
+      - .:/usr/src/app
+    depends_on:
+      pcc_db:
+        condition: service_healthy
+    restart: "no"
+
+networks:
+  pcc_shared_net:
+    driver: bridge
+
+volumes:
+  pcc_rabbitmq_data:
+  pcc_rabbitmq_log:
+  pcc_pg_data:

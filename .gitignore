@@ -1,0 +1,8 @@
+.idea/
+results/
+__pycache__/
+*_data
+*_logs
+*_log
+.venv
+.env
