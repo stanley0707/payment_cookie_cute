@@ -65,7 +65,9 @@ class QueueSettings(BaseSettings):
     port: str = "5672"
 
     event_queue_name: str = "payments.new"
+    retry_event_queue_name: str = "payments.new.retry"
     dlq_event_queue_name: str = "payments.new.dlq"
+    retry_ttl: int = 60
 
     @property
     def rabbitmq_url(self) -> str:

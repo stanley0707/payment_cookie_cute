@@ -26,6 +26,16 @@ PAYMENTS_QUEUE = RabbitQueue(
     },
 )
 
+RETRY_PAYMENTS_QUEUE = RabbitQueue(
+    get_settings(QueueSettings).retry_event_queue_name,
+    durable=True,
+    arguments={
+        "x-message-ttl": get_settings(QueueSettings).retry_ttl,
+        "x-dead-letter-exchange": "",
+        "x-dead-letter-routing-key": get_settings(QueueSettings).event_queue_name,
+    },
+)
+
 DLQ_QUEUE = RabbitQueue(get_settings(QueueSettings).dlq_event_queue_name, durable=True)
 
 
@@ -43,24 +53,25 @@ async def main() -> None:
 
         @broker.subscriber(PAYMENTS_QUEUE)
         async def handle_payment(payload: dict, message: RabbitMessage) -> None:
-            x_death = message.headers.get("x-death", [])
-            retry_count = x_death[0]["count"] if x_death else 0
+            current_retry = message.headers.get("x-retry-count", 0)
 
-            if retry_count >= 3:
+            if current_retry >= 3:
                 await logger.aerror(
                     "consumer.message_exhausted",
-                    extra={"payload": payload, "retries": retry_count},
+                    extra={"payload": payload, "retries": current_retry},
                 )
                 raise RejectMessage()
 
             try:
                 await processor.process(payload)
             except Exception as exc:
+                new_headers = {**message.headers, "x-retry-count": current_retry + 1}
+                await broker.publish(payload, queue=RETRY_PAYMENTS_QUEUE, headers=new_headers)
                 await logger.aexception(
-                    "consumer.processing_failed",
-                    extra={"error": str(exc), "retry": retry_count},
+                    "Retry for consumer.processing_failed",
+                    extra={"error": str(exc), "retry": current_retry},
                 )
-                raise exc
+                return
 
         @broker.subscriber(DLQ_QUEUE)
         async def handle_dlq(payload: dict) -> None:
