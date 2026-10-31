@@ -33,6 +33,7 @@ class PaymentProcessor:
     async def _get_wh_from_event(self, payload: PaymentCreatedPayload) -> str | None:
         async with self._session_factory() as session:
             payments_repository = PaymentRepository(session)
+
             if payment := await payments_repository.get(payload.payment_id):
                 if payment.status != PaymentStatus.PENDING:
                     await logger.ainfo(

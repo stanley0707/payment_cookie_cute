@@ -64,15 +64,10 @@ class WebhookProcessor:
             )
 
     async def process(self, payload: WebhookCreatePayload, current_retry: int = 0) -> None:
-        logger.info(" ---- 1")
         if await self.validate_request(payload):
-            logger.info(" ---- 2")
             await self._add_try_count(payload.payment_id, value=current_retry)
-            logger.info(" ---- 3")
             await self._send_webhook(payload)
-            logger.info(" ---- 4")
             await self.set_to_success(payload)
-            logger.info(" ---- 5")
 
     async def _send_webhook(self, payment: WebhookCreatePayload) -> None:
         if payment is not None:
