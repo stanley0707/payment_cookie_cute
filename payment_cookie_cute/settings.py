@@ -65,7 +65,9 @@ class QueueSettings(BaseSettings):
     port: str = "5672"
 
     event_queue_name: str = "payments.new"
+    event_wh_queue_name: str = "payments.new.wh"
     retry_event_queue_name: str = "payments.new.retry"
+    retry_wh_event_queue_name: str = "payments.new.wh.retry"
     dlq_event_queue_name: str = "payments.new.dlq"
     retry_ttl: int = 60
 

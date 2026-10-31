@@ -3,6 +3,7 @@ import asyncio
 from faststream.rabbit import RabbitBroker
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from payment_cookie_cute.dto import EventType
 from payment_cookie_cute.repositories import OutboxRepository
 from payment_cookie_cute.settings import QueueSettings
 from payment_cookie_cute.utils import get_logger
@@ -22,6 +23,7 @@ class OutboxPublisher:
         self._session_factory = session_factory
         self._broker = broker
         self._queue = queue_settings.event_queue_name
+        self._queue_wh = queue_settings.event_wh_queue_name
         self._max_retries = max_retries
         self._poll_interval = poll_interval
 
@@ -37,12 +39,14 @@ class OutboxPublisher:
                 events = await outbox_repository.fetch_pending(limit=limit)
                 for event in events:
                     try:
-                        await self._broker.publish(
-                            event.payload,
-                            queue=self._queue,
-                        )
+                        if event.event_type == EventType.PAYMENT_CREATED:
+                            await self._broker.publish(event.payload, queue=self._queue)
+                        elif event.event_type == EventType.WEBHOOK_SENT:
+                            await self._broker.publish(event.payload, queue=self._queue_wh)
+
                         await outbox_repository.mark_published(event.id)
                         published += 1
+
                     except Exception as exc:
                         await logger.aexception(
                             "outbox.publish_failed",

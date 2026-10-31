@@ -1,19 +1,21 @@
 import asyncio
 import random
-import uuid
-from datetime import UTC, datetime
 
-import httpx
+from faststream.rabbit import RabbitBroker
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
 )
 
 from payment_cookie_cute.dto import (
-    PaymentDTORead,
+    AggregateType,
+    EventType,
+    OutboxStatus,
+    PaymentCreatedPayload,
     PaymentStatus,
+    WebhookCreatePayload,
 )
-from payment_cookie_cute.repositories import PaymentRepository
+from payment_cookie_cute.repositories import OutboxRepository, PaymentRepository
 from payment_cookie_cute.utils import get_logger
 
 logger = get_logger(__name__)
@@ -23,66 +25,92 @@ class PaymentProcessor:
     def __init__(
         self,
         session_factory: async_sessionmaker[AsyncSession],
-        http_client: httpx.AsyncClient,
-        webhook_max_retries: int = 3,
+        broker: RabbitBroker,
     ) -> None:
         self._session_factory = session_factory
-        self._http = http_client
-        self._webhook_max_retries = webhook_max_retries
+        self._broker = broker
 
-    async def process(self, payload: dict) -> None:
+    async def _get_wh_from_event(self, payload: PaymentCreatedPayload) -> str | None:
         async with self._session_factory() as session:
             payments_repository = PaymentRepository(session)
-            payment_id = uuid.UUID(payload["payment_id"])
+            if payment := await payments_repository.get(payload.payment_id):
+                if payment.status != PaymentStatus.PENDING:
+                    await logger.ainfo(
+                        "payment.already_processed",
+                        extra={"payment_id": str(payload.payment_id)},
+                    )
+                    return None
+
+                return payment.webhook_url
+
+            raise ValueError(f"payment {payload.payment_id} not found")
+
+    async def _init_wh(self, payload: PaymentCreatedPayload, webhook: str) -> None:
+        async with self._session_factory() as session:
+            payments_repository = PaymentRepository(session)
+            outbox_repository = OutboxRepository(session)
+
+            new_status = PaymentStatus.SUCCESS if random.random() < 0.9 else PaymentStatus.FAILURE
 
             async with session.begin():
-                payment = await payments_repository.get(payment_id, for_update=True)
-                if payment is None:
-                    raise ValueError(f"payment {payment_id} not found")
-                if payment.status != PaymentStatus.PENDING:
-                    logger.info(
-                        "payment.already_processed",
-                        extra={"payment_id": str(payment_id)},
+                outbox_id = await outbox_repository.get_incr_id()
+                wh_payload = WebhookCreatePayload(
+                    payment_id=payload.payment_id,
+                    webhook_url=webhook,
+                    status=new_status,
+                    outbox_id=outbox_id,
+                    currency=payload.currency,
+                    amount=payload.amount,
+                )
+                if payment := await payments_repository.update_by(
+                    payments_repository.model.id == payload.payment_id,
+                    payments_repository.model.status == PaymentStatus.PENDING,
+                    data={
+                        "status": wh_payload.status,
+                        "processed_at": wh_payload.processed_at,
+                    },
+                ):
+                    outbox = await outbox_repository.create(
+                        id=wh_payload.outbox_id,
+                        aggregate_type=AggregateType.WEBHOOK,
+                        aggregate_id=payment.id,
+                        event_type=EventType.WEBHOOK_SENT,
+                        payload=wh_payload.model_dump(mode="json"),
+                        status=OutboxStatus.PENDING,
                     )
-                    return
+                    logger.info(f"outbox {outbox.published_at}")
 
-                await asyncio.sleep(random.uniform(2, 5))
+    async def set_to_success(self, payload: PaymentCreatedPayload) -> None:
+        async with self._session_factory() as session:
+            outbox_repository = OutboxRepository(session)
 
-                new_status = (
-                    PaymentStatus.SUCCESS if random.random() < 0.9 else PaymentStatus.FAILURE
+            async with session.begin():
+                await outbox_repository.update_by(
+                    outbox_repository.model.id == payload.outbox_id,
+                    outbox_repository.model.status == OutboxStatus.PENDING,
+                    outbox_repository.model.event_type == EventType.PAYMENT_CREATED,
+                    data={
+                        "status": OutboxStatus.COMPLETED,
+                    },
                 )
-                updated = await payments_repository.update_status(
-                    payment.id,
-                    new_status,
-                    processed_at=datetime.now(UTC),
-                )
 
-            await self._send_webhook(updated, new_status)
+    async def _add_try_count(self, aggregate_id: str, value: int) -> None:
+        async with self._session_factory() as session:
+            outbox_repository = OutboxRepository(session)
+            await outbox_repository.update_by(
+                outbox_repository.model.aggregate_id == aggregate_id,
+                outbox_repository.model.event_type == EventType.PAYMENT_CREATED,
+                data={"retry_count": value},
+            )
 
-    async def _send_webhook(
-        self,
-        payment: PaymentDTORead | None,
-        status: PaymentStatus,
-    ) -> None:
-        if payment is None:
-            return
-        payload = {
-            "payment_id": str(payment.id),
-            "status": status.value,
-            "processed_at": payment.processed_at.isoformat() if payment.processed_at else None,
-        }
-        for attempt in range(self._webhook_max_retries):
-            try:
-                resp = await self._http.post(payment.webhook_url, json=payload)
-                resp.raise_for_status()
-                return
-            except httpx.HTTPError as exc:
-                await logger.awarning(
-                    "webhook.attempt_failed",
-                    extra={"attempt": attempt + 1, "error": str(exc)},
-                )
-                await asyncio.sleep(2**attempt)
-        await logger.aerror(
-            "webhook.give_up",
-            extra={"payment_id": str(payment.id)},
-        )
+    async def process(self, payload: PaymentCreatedPayload, current_retry: int = 0) -> None:
+        if wh := await self._get_wh_from_event(payload):
+            await self._add_try_count(payload.payment_id, value=current_retry)
+            await self.make_payment()
+            await self._init_wh(payload, webhook=wh)
+            await self.set_to_success(payload)
+
+    @staticmethod
+    async def make_payment():
+        # make payment here
+        await asyncio.sleep(random.uniform(2, 5))

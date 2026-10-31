@@ -4,8 +4,12 @@ from payment_cookie_cute.dto.enums import (
     EventType,
     OutboxStatus,
     PaymentStatus,
+    WebhookStatus,
 )
-from payment_cookie_cute.dto.events import PaymentCreatedPayload
+from payment_cookie_cute.dto.events import (
+    PaymentCreatedPayload,
+    WebhookCreatePayload,
+)
 from payment_cookie_cute.dto.outboxdto import (
     OutboxDTO,
     OutboxDTOList,
@@ -22,6 +26,7 @@ __all__ = [
     "Currency",
     "OutboxStatus",
     "AggregateType",
+    "WebhookStatus",
     "EventType",
     "PaymentDTO",
     "PaymentDTORead",
@@ -30,4 +35,5 @@ __all__ = [
     "OutboxDTORead",
     "OutboxDTOList",
     "PaymentCreatedPayload",
+    "WebhookCreatePayload",
 ]

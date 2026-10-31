@@ -63,6 +63,19 @@ class BaseRepository(Generic[Model, DTO, READ_DTO, LIST_DTO]):
         )
         return self.list_dto.model_validate(models)
 
+    async def update_by(
+        self, *expression: ColumnElement[bool], data: dict[str, Any]
+    ) -> READ_DTO | None:
+        if len(data):
+            res = await self._session.execute(
+                update(self.model).where(*expression).values(**data).returning(self.model)
+            )
+            if res := res.scalar():
+                await self._session.flush()
+                await self._session.refresh(res)
+                return res  # type: ignore[no-any-return]
+        return None
+
     async def create(self, **values: Any) -> READ_DTO:
         model = await self._create_model(**values)
         return self.read_dto.model_validate(model)

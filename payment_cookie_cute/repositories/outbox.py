@@ -1,6 +1,7 @@
 from sqlalchemy import (
     func,
     select,
+    text,
     update,
 )
 
@@ -26,6 +27,10 @@ class OutboxRepository(
     read_dto = OutboxDTORead
     list_dto = OutboxDTOList
     model = Outbox
+
+    async def get_incr_id(self) -> int:
+        seq_result = await self._session.execute(text("SELECT nextval('outbox_id_seq')"))
+        return seq_result.scalar_one()
 
     async def fetch_pending(self, limit: int = 100) -> OutboxDTOList:
         stmt = (

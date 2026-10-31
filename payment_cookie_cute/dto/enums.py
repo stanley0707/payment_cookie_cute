@@ -4,6 +4,7 @@ from enum import StrEnum
 class OutboxStatus(StrEnum):
     PENDING = "pending"
     PUBLISHED = "published"
+    COMPLETED = "completed"
     FAILED = "failed"
 
 
@@ -31,3 +32,9 @@ class EventType(StrEnum):
     PAYMENT_FAILED = "payment.failed"
     REFUND_ISSUED = "refund.issued"
     WEBHOOK_SENT = "webhook.sent"
+
+
+class WebhookStatus(StrEnum):
+    PENDING = "pending"
+    SENT = "sent"
+    FAILED = "failed"

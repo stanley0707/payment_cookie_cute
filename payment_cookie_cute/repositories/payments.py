@@ -9,6 +9,7 @@ from payment_cookie_cute.dto import (
     PaymentDTOList,
     PaymentDTORead,
     PaymentStatus,
+    WebhookStatus,
 )
 
 
@@ -32,9 +33,12 @@ class PaymentRepository(
         self,
         payment_id: UUID4,
         status: PaymentStatus,
+        wh_status: WebhookStatus | None = None,
         processed_at: datetime | None = None,
     ) -> PaymentDTORead | None:
         values: dict = {"status": status.value}
+        if wh_status is not None:
+            values["webhook_status"] = wh_status.value
         if processed_at is not None:
             values["processed_at"] = processed_at
 

@@ -48,27 +48,28 @@ class PaymentService:
             payment = await self._payments_repository.create(
                 id=uuid.uuid4(),
                 amount=data.amount,
-                currency=data.currency.value,
+                currency=data.currency,
                 description=data.description,
                 meta=data.meta,
-                status=PaymentStatus.PENDING.value,
+                status=PaymentStatus.PENDING,
                 idempotency_key=idempotency_key,
                 webhook_url=str(data.webhook_url),
             )
 
-            payload = PaymentCreatedPayload(
-                payment_id=payment.id,
-                amount=payment.amount,
-                currency=payment.currency,
-                webhook_url=payment.webhook_url,
-            ).model_dump(mode="json")
-
+            outbox_id = await self._outbox_repository.get_incr_id()
             await self._outbox_repository.create(
-                aggregate_type=AggregateType.PAYMENT.value,
+                id=outbox_id,
+                aggregate_type=AggregateType.PAYMENT,
                 aggregate_id=payment.id,
-                event_type=EventType.PAYMENT_CREATED.value,
-                payload=payload,
-                status=OutboxStatus.PENDING.value,
+                event_type=EventType.PAYMENT_CREATED,
+                payload=PaymentCreatedPayload(
+                    payment_id=payment.id,
+                    amount=payment.amount,
+                    currency=payment.currency,
+                    webhook_url=payment.webhook_url,
+                    outbox_id=outbox_id,
+                ).model_dump(mode="json"),
+                status=OutboxStatus.PENDING,
             )
             return payment
 
