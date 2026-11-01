@@ -128,8 +128,7 @@ async def main() -> None:
     async def handle_dlq(payload: dict) -> None:
         await logger.aerror("dlq.message_received", extra={"payload": payload})
 
-        outbox_id = payload.get("outbox_id")
-        if outbox_id:
+        if outbox_id := payload.get("outbox_id"):
             async with session_factory() as session:
                 outbox_repository = OutboxRepository(session)
                 async with session.begin():
