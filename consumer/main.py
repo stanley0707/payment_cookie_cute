@@ -7,6 +7,7 @@ from faststream.rabbit import (
     RabbitQueue,
 )
 from faststream.rabbit.annotations import RabbitBroker
+from faststream.rabbit.schemas import Channel
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -92,7 +93,10 @@ async def main() -> None:
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
     broker = RabbitBroker(settings.rabbitmq_url)
 
-    @broker.subscriber(WEBHOOK_QUEUE)
+    @broker.subscriber(
+        WEBHOOK_QUEUE,
+        channel=Channel(prefetch_count=get_settings(Settings).wh_event_prefetch_count),
+    )
     @retry_on_error(RETRY_WH_WEBHOOK_QUEUE, dto=WebhookCreatePayload)
     async def handle_webhook(payload: WebhookCreatePayload, message: RabbitMessage, **_):
         async with httpx.AsyncClient(timeout=10.0) as http_client:
@@ -105,7 +109,10 @@ async def main() -> None:
                 payload, current_retry=message.headers.get("x-retry-count", 0)
             )
 
-    @broker.subscriber(PAYMENTS_QUEUE)
+    @broker.subscriber(
+        PAYMENTS_QUEUE,
+        channel=Channel(prefetch_count=get_settings(Settings).event_prefetch_count),
+    )
     @retry_on_error(RETRY_PAYMENTS_QUEUE, dto=PaymentCreatedPayload)
     async def handle_payment(payload: PaymentCreatedPayload, message: RabbitMessage, **_) -> None:
         processor = PaymentProcessor(
@@ -114,7 +121,10 @@ async def main() -> None:
         )
         await processor.process(payload, current_retry=message.headers.get("x-retry-count", 0))
 
-    @broker.subscriber(DLQ_QUEUE)
+    @broker.subscriber(
+        DLQ_QUEUE,
+        channel=Channel(prefetch_count=get_settings(Settings).dlq_event_prefetch_count),
+    )
     async def handle_dlq(payload: dict) -> None:
         await logger.aerror("dlq.message_received", extra={"payload": payload})
 

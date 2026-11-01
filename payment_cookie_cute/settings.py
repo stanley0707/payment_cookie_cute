@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     api_key: str = Field(..., min_length=8)
     webhook_timeout: int = 10
     webhook_max_retries: int = 3
+    wh_event_prefetch_count: int = 10
+    event_prefetch_count: int = 10
+    dlq_event_prefetch_count: int = 5
 
     @property
     def is_prod(self):
